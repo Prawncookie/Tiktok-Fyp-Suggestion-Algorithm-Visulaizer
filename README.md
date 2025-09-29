@@ -37,20 +37,27 @@ Testing
 The project includes basic unit tests for core functions. Run the test suite with:
 <img width="1395" height="188" alt="Screenshot 2025-09-30 021439" src="https://github.com/user-attachments/assets/90b41d72-ef8b-4701-a22e-1359c648f3f1" />
 
-Development and Challenges
-This project was developed iteratively, focusing on accuracy to TikTok's described algorithm (e.g., math-based pattern matching for recommendations). Key challenges included simulating realistic user behavior and ensuring balanced category dominance in viral content.
-The Dominance Issue
+Development and Challenges:
+
+This project was developed iteratively, focusing on accuracy to TikTok's described algorithm (e.g., math-based pattern matching for recommendations). 
+Key challenges included simulating realistic user behavior and ensuring balanced category dominance in viral content.
+
+The Dominance Issue,
 One major challenge was category dominance skew, where simulations often resulted in 2-3 categories dominating top virals, leaving others at zero. This stemmed from feedback loops where early random wins in certain categories (e.g., cooking, dance) amplified their rank scores, starving others.
 Attempts to Solve
 
 Initial Forcing: Guaranteed 1-2 recs from low-pref (<0.5) categories, but zeros persisted in some runs.
+
 Randomized Ranking: Shuffled initial ranked videos in discovery to avoid bias, improving variability but not eliminating zeros.
 Adaptation Boost: Added +100 score boost for low-pref (<0.4) in adaptation phase, but early lock-in limited impact.
+
 Scaling: Increased to 20 users and 50 sessions for more data, which helped but didn't resolve zeros.
 
-What Finally Worked
+What Finally Worked:
+
 The solution was a stronger diversity override: forcing 1 rec from each of the 5 categories per session in personalization and adaptation phases, capped at 6 recs. Combined with a revised dominance metric (total engages per category / total engages overall), this ensured all categories had non-zero dominance (e.g., 0.15-0.25 range) and balanced viral distribution.
-Contributing
+
+Contributing,
 Contributions are welcome! Please follow these steps:
 
 Fork the repository.
