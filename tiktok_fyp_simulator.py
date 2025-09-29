@@ -5,58 +5,337 @@ import numpy as np
 
 # Configuration settings for the TikTok FYP simulator
 CONFIG = {
-    'like_bonus': 50,      # Points added for each liked video
-    'share_bonus': 100,    # Points added for each shared video
-    'initial_recs': 6,     # Number of videos to recommend initially
-    'video_pool_size': 20, # Total number of videos in the pool
-    'min_watch_time': 10,  # Minimum watch time in seconds
-    'max_watch_time': 60   # Maximum watch time in seconds
+    'like_bonus': 50,
+    'share_bonus': 100,
+    'initial_recs': 6,
+    'video_pool_size': 60,
+    'min_watch_time': 5,
+    'max_watch_time': 60,
+    'viral_threshold': 0.7,
+    'exploration_rate': 0.3,
+    'discovery_end': 20,
+    'adaptation_start': 30
 }
 
-users_data = {
-    'Alice': {
-        'watched': [(1, 40), (3, 60), (2, 20), (6, 50), (10, 60), (13, 10)],
-        'likes': [10, 6, 3],
-        'shares': [3],
-    },
-    'Liam': {
-        'watched': [(20, 40), (5, 10), (18, 20), (1, 30), (13, 20), (17, 10)],
-        'likes': [1, 20],
-        'shares': [],
-    },
-    'Bob': {
-        'watched': [(4, 30), (10, 20), (15, 30), (7, 20), (12, 50), (3, 10)],
-        'likes': [4, 12, 7, 15],
-        'shares': [10, 12, 4],
-    },
-    'Travis': {
-        'watched': [(8, 20), (13, 40), (11, 30), (6, 50), (9, 20), (8, 30)],
-        'likes': [13, 8],
-        'shares': [8, 6, 13],
-    },
-    'Scott': {
-        'watched': [(17, 40), (16, 20), (19, 20), (14, 40), (2, 30), (15, 20)],
-        'likes': [],
-        'shares': [],
-    }
-}
-def calculate_engagement(user_data):
-    # Step 1: Add up all watch times
-    total_watch_time = 0
-    for video_id, watch_time in user_data['watched']:
-        total_watch_time += watch_time
-    
-    # Step 2: Calculate like bonus
-    like_bonus = len(user_data['likes']) * CONFIG['like_bonus']
-    
-    # Step 3: Calculate share bonus
-    share_bonus = len(user_data['shares']) * CONFIG['share_bonus']
-    
-    # Step 4: Return total
-    return total_watch_time + like_bonus + share_bonus
+categories = ['cooking', 'dance', 'comedy', 'pets', 'sports']
 
-alice_score = calculate_engagement(users_data['Alice'])
-print(f"Alice's engagement score: {alice_score}")
+def video_pool():
+    videos = {}
+    for i in range(1, CONFIG['video_pool_size'] + 1):
+        category = categories[(i - 1) % len(categories)]
+        title = f"{category.capitalize()} Tip #{i}"
+        base_popularity = random.randint(50, 100)
+        performance = {'avg_completion': 0.0, 'total_engages': 0}
+        videos[i] = {'title': title, 'category': category, 'base_popularity': base_popularity, 'performance': performance}
+    return videos
+video_pool_dict = video_pool()
 
-bob_score = calculate_engagement(users_data['Bob'])
-print(f"Bob's engagement score: {bob_score}")
+def initialize_users(num_users):
+    users = {}
+    for i in range(1, num_users + 1):
+        user_id = f'User{i}'
+        # Add random initial category preferences to diversify engagement
+        prefs = {cat: random.uniform(0.1, 0.3) for cat in categories}
+        users[user_id] = {
+            'interactions': [],
+            'category_prefs': prefs,
+            'phase': 'discovery'
+        }
+    return users
+
+def log_interaction(user_id, video_id, watch_time, liked, shared, commented, session):
+    global users
+    users = initialize_users(20) if 'users' not in globals() else users
+    if user_id in users:
+        video_category = video_pool_dict[video_id]['category']
+        completion = min(watch_time / 60.0, 1.0)
+        interaction = {
+            'video_id': video_id,
+            'watch_time': watch_time,
+            'completion': completion,
+            'liked': liked,
+            'shared': shared,
+            'commented': commented,
+            'session': session
+        }
+        users[user_id]['interactions'].append(interaction)
+        update_video_performance(video_id, watch_time, liked, shared, commented)
+        
+        pref_boost = 0.0
+        if watch_time > 30 or liked or shared or commented:
+            pref_boost = 0.1
+        users[user_id]['category_prefs'][video_category] = min(users[user_id]['category_prefs'][video_category] + pref_boost, 1.0)
+        
+        if session > CONFIG['discovery_end'] and users[user_id]['phase'] == 'discovery':
+            users[user_id]['phase'] = 'personalization'
+        elif session > CONFIG['adaptation_start'] and users[user_id]['phase'] == 'personalization':
+            users[user_id]['phase'] = 'adaptation'
+    return users
+
+def update_video_performance(video_id, watch_time, liked, shared, commented):
+    if video_id not in video_pool_dict:
+        print(f'Video ID {video_id} not found in video pool.')
+        return
+    current_perf = video_pool_dict[video_id]['performance']
+    old_avg = current_perf['avg_completion']
+    old_engages = current_perf['total_engages']
+    completion = min(watch_time / 60.0, 1.0)
+    avg_completion = (old_avg * old_engages + completion) / (old_engages + 1)
+    current_perf['avg_completion'] = avg_completion
+    current_perf['total_engages'] += (1 if liked else 0) + (1 if shared else 0) + (1 if commented else 0)
+    if avg_completion > CONFIG['viral_threshold']:
+        video_pool_dict[video_id]['base_popularity'] *= 1.2
+
+def Overall_Performance_Score(video_id):
+    if video_id not in video_pool_dict:
+        print(f'Video ID {video_id} not found in video pool.')
+        return None
+    base_popularity = video_pool_dict[video_id]['base_popularity']
+    avg_completion = video_pool_dict[video_id]['performance']['avg_completion']
+    total_engages = video_pool_dict[video_id]['performance']['total_engages']
+    score = base_popularity + (avg_completion * 100) + total_engages
+    return score
+
+def get_video_rank():
+    score_pairs = []
+    for video_id in video_pool_dict.keys():
+        base_popularity = video_pool_dict[video_id]['base_popularity']
+        avg_completion = video_pool_dict[video_id]['performance']['avg_completion']
+        total_engages = video_pool_dict[video_id]['performance']['total_engages']
+        score = base_popularity + (avg_completion * 100) + total_engages
+        score_pairs.append((video_id, score))
+    sorted_pairs = sorted(score_pairs, key=lambda x: x[1], reverse=True)
+    return [pair[0] for pair in sorted_pairs]
+
+def recommend_videos(user_id, session, num_recs):
+    global users, video_pool_dict
+    users = initialize_users(20) if 'users' not in globals() else users
+    phase = users[user_id]['phase']
+    ranked_videos = get_video_rank()
+    recommendations = []
+
+    if phase == 'discovery' and session <= CONFIG['discovery_end']:
+        random.shuffle(ranked_videos)  # Randomize initial ranked videos
+        random_count = int(num_recs * CONFIG['exploration_rate'])
+        ranked_count = num_recs - random_count
+        recommendations = ranked_videos[:ranked_count]
+        recommendations.extend(random.sample(list(video_pool_dict.keys()), random_count))
+    
+    elif phase == 'personalization' or (session > CONFIG['discovery_end'] and session <= CONFIG['adaptation_start']):
+        video_scores = []
+        for vid in video_pool_dict.keys():
+            category = video_pool_dict[vid]['category']
+            pref_score = users[user_id]['category_prefs'].get(category, 0.0) * 100
+            rank_score = Overall_Performance_Score(vid) or 0
+            video_scores.append((vid, pref_score + rank_score))
+        video_scores.sort(key=lambda x: x[1], reverse=True)
+        recommendations = [vid for vid, _ in video_scores[:num_recs]]
+        # Force 1 rec from each category, up to num_recs, prioritizing diversity
+        diversity_vids = {cat: [vid for vid in video_pool_dict if video_pool_dict[vid]['category'] == cat and vid not in recommendations] for cat in categories}
+        diversity_picks = []
+        for cat in categories:
+            if diversity_vids[cat]:
+                diversity_picks.append(random.choice(diversity_vids[cat]))
+                diversity_vids[cat] = [v for v in diversity_vids[cat] if v not in diversity_picks]
+        diversity_picks = diversity_picks[:num_recs]  # Cap at 6
+        recommendations = diversity_picks + [vid for vid in recommendations if vid not in diversity_picks][:num_recs - len(diversity_picks)]
+    
+    elif phase == 'adaptation' or session > CONFIG['adaptation_start']:
+        recent_vids = [i['video_id'] for i in users[user_id]['interactions'][-5:]] if users[user_id]['interactions'] else []
+        video_scores = []
+        for vid in video_pool_dict.keys():
+            category = video_pool_dict[vid]['category']
+            pref_score = users[user_id]['category_prefs'].get(category, 0.0) * 100
+            rank_score = Overall_Performance_Score(vid) or 0
+            recent_boost = 50 if vid in recent_vids else 0
+            low_pref_boost = 100 if users[user_id]['category_prefs'].get(category, 0.0) < 0.4 else 0
+            video_scores.append((vid, pref_score + rank_score + recent_boost + low_pref_boost))
+        video_scores.sort(key=lambda x: x[1], reverse=True)
+        recommendations = [vid for vid, _ in video_scores[:num_recs]]
+        # Force 1 rec from each category, up to num_recs, prioritizing diversity
+        diversity_vids = {cat: [vid for vid in video_pool_dict if video_pool_dict[vid]['category'] == cat and vid not in recommendations] for cat in categories}
+        diversity_picks = []
+        for cat in categories:
+            if diversity_vids[cat]:
+                diversity_picks.append(random.choice(diversity_vids[cat]))
+                diversity_vids[cat] = [v for v in diversity_vids[cat] if v not in diversity_picks]
+        diversity_picks = diversity_picks[:num_recs]  # Cap at 6
+        recommendations = diversity_picks + [vid for vid in recommendations if vid not in diversity_picks][:num_recs - len(diversity_picks)]
+
+    return recommendations[:num_recs]
+
+def run_simulation(user_id, num_sessions):
+    global users, video_pool_dict
+    users = initialize_users(20) if 'users' not in globals() else users
+    for session in range(1, num_sessions + 1):
+        recs = recommend_videos(user_id, session, CONFIG['initial_recs'])
+        for video_id in recs:
+            category = video_pool_dict[video_id]['category']
+            watch_time = random.randint(CONFIG['min_watch_time'], CONFIG['max_watch_time'])
+            liked = random.random() < users[user_id]['category_prefs'].get(category, 0.0) + 0.1
+            shared = random.random() < users[user_id]['category_prefs'].get(category, 0.0) * 0.5
+            commented = random.random() < users[user_id]['category_prefs'].get(category, 0.0) * 0.2
+            users = log_interaction(user_id, video_id, watch_time, liked, shared, commented, session)
+    return users
+
+def analyze_user_phase_metrics(user_id):
+    global users
+    if user_id not in users:
+        return {"error": f"User {user_id} not found"}
+    
+    phase_data = {'discovery': [], 'personalization': [], 'adaptation': []}
+    for interaction in users[user_id]['interactions']:
+        session = interaction['session']
+        phase = 'discovery' if session <= CONFIG['discovery_end'] else \
+                'adaptation' if session > CONFIG['adaptation_start'] else 'personalization'
+        engagement = interaction['watch_time']
+        if interaction['liked']: engagement += CONFIG['like_bonus']
+        if interaction['shared']: engagement += CONFIG['share_bonus']
+        if interaction['commented']: engagement += 75  # Comment bonus
+        phase_data[phase].append(engagement)
+    
+    metrics = {}
+    discovery_avg = 0
+    personalization_avg = 0
+    for phase in phase_data:
+        if phase_data[phase]:
+            avg_engagement = sum(phase_data[phase]) / len(phase_data[phase])
+            metrics[f'{phase}_avg_engagement'] = avg_engagement
+            if phase == 'discovery':
+                discovery_avg = avg_engagement
+            elif phase == 'personalization':
+                personalization_avg = avg_engagement
+    if discovery_avg > 0 and personalization_avg > 0:
+        satisfaction_trend = ((personalization_avg - discovery_avg) / discovery_avg) * 100
+        metrics['satisfaction_trend'] = satisfaction_trend
+    metrics['pref_shifts'] = users[user_id]['category_prefs'].copy()
+    return metrics
+
+def analyze_video_performance():
+    global video_pool_dict
+    video_metrics = {}
+    total_interactions = sum(len(users[user_id]['interactions']) for user_id in users)
+    for video_id, video in video_pool_dict.items():
+        perf = video['performance']
+        if perf['total_engages'] > 0:
+            completion_velocity = perf['total_engages'] / total_interactions
+            video_metrics[video_id] = {
+                'avg_completion': perf['avg_completion'],
+                'completion_velocity': completion_velocity,
+                'total_engages': perf['total_engages'],
+                'is_viral': perf['avg_completion'] > CONFIG['viral_threshold'] and perf['total_engages'] > sum(v['performance']['total_engages'] for v in video_pool_dict.values()) / len(video_pool_dict)
+            }
+    top_virals = sorted(video_metrics.items(), key=lambda x: x[1]['completion_velocity'], reverse=True)[:3]
+    category_dominance = {cat: 0 for cat in categories}
+    total_engages = sum(v['performance']['total_engages'] for v in video_pool_dict.values())
+    for cat in categories:
+        cat_videos = [v for v in video_pool_dict if video_pool_dict[v]['category'] == cat]
+        if cat_videos:
+            cat_engages = sum(video_pool_dict[v]['performance']['total_engages'] for v in cat_videos)
+            category_dominance[cat] = cat_engages / total_engages if total_engages > 0 else 0
+    return {'video_metrics': video_metrics, 'top_virals': top_virals, 'category_dominance': category_dominance}
+
+def measure_algo_effectiveness():
+    global users
+    effectiveness = {}
+    for user_id in users:
+        interactions = users[user_id]['interactions']
+        if not interactions:
+            continue
+        high_engagement_recs = sum(1 for i in interactions if i['completion'] > 0.5) / len(interactions)
+        effectiveness[user_id] = {'rec_accuracy': high_engagement_recs * 100}
+        phase_engagements = {'discovery': [], 'personalization': [], 'adaptation': []}
+        for i in interactions:
+            phase = 'discovery' if i['session'] <= CONFIG['discovery_end'] else \
+                    'adaptation' if i['session'] > CONFIG['adaptation_start'] else 'personalization'
+            engagement = i['watch_time']
+            if i['liked']: engagement += CONFIG['like_bonus']
+            if i['shared']: engagement += CONFIG['share_bonus']
+            if i['commented']: engagement += 75
+            phase_engagements[phase].append(engagement)
+        if phase_engagements['discovery'] and phase_engagements['personalization']:
+            personalization_boost = ((sum(phase_engagements['personalization']) / len(phase_engagements['personalization']) if phase_engagements['personalization'] else 0) - 
+                                  (sum(phase_engagements['discovery']) / len(phase_engagements['discovery']))) / (sum(phase_engagements['discovery']) / len(phase_engagements['discovery'])) * 100
+            effectiveness[user_id]['personalization_boost'] = personalization_boost
+        unique_cats = set(video_pool_dict[i['video_id']]['category'] for i in interactions)
+        diversity_balance = len(unique_cats) / len(categories) if categories else 0
+        effectiveness[user_id]['diversity_balance'] = diversity_balance * 100
+    return effectiveness
+
+def generate_insights():
+    global users
+    insights = []
+    for user_id in users:
+        metrics = analyze_user_phase_metrics(user_id)
+        if 'error' not in metrics:
+            discovery_avg = metrics.get('discovery_avg_engagement', 0)
+            personalization_avg = metrics.get('personalization_avg_engagement', 0)
+            trend = metrics.get('satisfaction_trend', 0)
+            insights.append(f"{user_id} engagement: Discovery avg {discovery_avg:.1f}s → Personalization {personalization_avg:.1f}s ({trend:+.1f}%)")
+    video_data = analyze_video_performance()
+    total_interactions = sum(len(users[user_id]['interactions']) for user_id in users)  # Define here
+    for vid, data in video_data['top_virals']:
+        insights.append(f"Top viral: Video {vid} ({video_pool_dict[vid]['title']}) - {data['avg_completion']*100:.1f}% completion, boosted recs {data['total_engages']*100/total_interactions:.1f}%")
+    algo_data = measure_algo_effectiveness()
+    avg_accuracy = sum(d['rec_accuracy'] for d in algo_data.values()) / len(algo_data) if algo_data else 0
+    insights.append(f"Algo accuracy: {avg_accuracy:.1f}% across users")
+    return insights
+
+def plot_user_engagement(user_id):
+    metrics = analyze_user_phase_metrics(user_id)
+    phases = ['discovery', 'personalization', 'adaptation']
+    engagements = [metrics.get(f'{p}_avg_engagement', 0) for p in phases]
+    plt.figure(figsize=(8, 5))
+    plt.plot(phases, engagements, marker='o')
+    plt.title(f'{user_id} Engagement by Phase')
+    plt.ylabel('Average Engagement (seconds)')
+    plt.grid(True)
+    plt.savefig(f'{user_id}_engagement.png')
+    plt.close()
+
+def plot_top_videos():
+    video_data = analyze_video_performance()
+    top_vids = video_data['top_virals']
+    vids, data = zip(*top_vids)
+    completions = [d['avg_completion'] * 100 for d in data]
+    plt.figure(figsize=(8, 5))
+    plt.bar([video_pool_dict[v]['title'] for v in vids], completions)
+    plt.title('Top 3 Viral Videos by Completion Rate')
+    plt.ylabel('Completion Rate (%)')
+    plt.xticks(rotation=45)
+    plt.savefig('top_videos.png')
+    plt.close()
+
+def plot_category_dominance():
+    video_data = analyze_video_performance()
+    dominance = video_data['category_dominance']
+    plt.figure(figsize=(8, 5))
+    plt.bar(dominance.keys(), dominance.values())
+    plt.title('Category Dominance in Top Virals Across Users')
+    plt.ylabel('Dominance Proportion')
+    plt.savefig('category_dominance.png')
+    plt.close()
+
+if __name__ == "__main__":
+    video_pool_dict = video_pool()
+    users = initialize_users(20)
+    print("Initial users:", users)
+    
+    # Run simulation for all 20 users with 50 sessions
+    for user_id in users:
+        users = run_simulation(user_id, 50)
+    print("After simulation - All users:", {k: {'interactions': len(v['interactions']), 'phase': v['phase']} for k, v in users.items()})
+    print("Video 1 performance:", video_pool_dict[1])
+    print("Top ranked videos:", get_video_rank()[:5])
+    print("Recommendations for User1 (session 25):", recommend_videos('User1', 25, 6))
+    
+    # Add analytics
+    insights = generate_insights()
+    for insight in insights:
+        print(insight)
+    
+    # Add visualizations
+    for user_id in users:
+        plot_user_engagement(user_id)
+    plot_top_videos()
+    plot_category_dominance()
