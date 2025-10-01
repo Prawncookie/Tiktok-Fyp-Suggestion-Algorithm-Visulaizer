@@ -22,7 +22,8 @@ No additional external package managers like npm are required, as the project is
 
 Steps
 1. Clone the Repository:
-<img width="1381" height="210" alt="Screenshot 2025-09-30 020958" src="https://github.com/user-attachments/assets/ea053cc8-97a3-4b93-87d3-37be3260735a" />
+<img width="1424" height="143" alt="Screenshot 2025-10-02 003104" src="https://github.com/user-attachments/assets/b61b8b77-23a0-4552-83e1-e5949b97a414" />
+
 2 .Navigate to the Project Directory:
 <img width="1400" height="188" alt="Screenshot 2025-09-30 021146" src="https://github.com/user-attachments/assets/43c467da-a6f7-4bf4-95de-73734d4d516a" />
 3. Install Dependencies:
