@@ -20,6 +20,7 @@ CONFIG = {
 categories = ['cooking', 'dance', 'comedy', 'pets', 'sports']
 
 def video_pool():
+    """Create a pool of videos with categories, titles, base popularity, and initial performance metrics."""
     videos = {}
     for i in range(1, CONFIG['video_pool_size'] + 1):
         category = categories[(i - 1) % len(categories)]
@@ -27,14 +28,20 @@ def video_pool():
         base_popularity = random.randint(50, 100)
         performance = {'avg_completion': 0.0, 'total_engages': 0}
         videos[i] = {'title': title, 'category': category, 'base_popularity': base_popularity, 'performance': performance}
-    return videos
+    video_ids = list(videos.keys())
+    random.shuffle(video_ids)
+    shuffled_videos = {i: videos[i] for i in video_ids}
+    
+    return shuffled_videos
+
 video_pool_dict = video_pool()
 
+
 def initialize_users(num_users):
+    """Create simulated users with random category preferences and initial empty interactions."""
     users = {}
     for i in range(1, num_users + 1):
         user_id = f'User{i}'
-        # Add random initial category preferences to diversify engagement
         prefs = {cat: random.uniform(0.1, 0.3) for cat in categories}
         users[user_id] = {
             'interactions': [],
@@ -43,7 +50,16 @@ def initialize_users(num_users):
         }
     return users
 
+
 def log_interaction(user_id, video_id, watch_time, liked, shared, commented, session):
+    """
+    Records a user's interaction with a video and updates user preferences and video performance.
+    Behavior:
+    - Records the interaction in the user's 'interactions' list.
+    - Updates video performance metrics via `update_video_performance`.
+    - Boosts the user's category preference if engagement thresholds are met.
+    - Updates the user's learning phase based on session and configured thresholds.
+    """
     global users
     users = initialize_users(20) if 'users' not in globals() else users
     if user_id in users:
@@ -64,9 +80,9 @@ def log_interaction(user_id, video_id, watch_time, liked, shared, commented, ses
         pref_boost = 0.0
         if watch_time > 30 or liked or shared or commented:
             pref_boost = 0.1
-        users[user_id]['category_prefs'][video_category] = min(users[user_id]['category_prefs'][video_category] + pref_boost, 1.0)
+        users[user_id]['category_prefs'][video_category] = min(users[user_id]['category_prefs'][video_category] + pref_boost, 1.0)#Note: Give diffrent actions a variety of weightage
         
-        if session > CONFIG['discovery_end'] and users[user_id]['phase'] == 'discovery':
+        if session > CONFIG['discovery_end'] and users[user_id]['phase'] == 'discovery': 
             users[user_id]['phase'] = 'personalization'
         elif session > CONFIG['adaptation_start'] and users[user_id]['phase'] == 'personalization':
             users[user_id]['phase'] = 'adaptation'
@@ -84,7 +100,7 @@ def update_video_performance(video_id, watch_time, liked, shared, commented):
     current_perf['avg_completion'] = avg_completion
     current_perf['total_engages'] += (1 if liked else 0) + (1 if shared else 0) + (1 if commented else 0)
     if avg_completion > CONFIG['viral_threshold']:
-        video_pool_dict[video_id]['base_popularity'] *= 1.2
+        video_pool_dict[video_id]['base_popularity'] *= 1.2  # 20% boost for viral videos
 
 def Overall_Performance_Score(video_id):
     if video_id not in video_pool_dict:
@@ -108,19 +124,39 @@ def get_video_rank():
     return [pair[0] for pair in sorted_pairs]
 
 def recommend_videos(user_id, session, num_recs):
+    """
+    Generate video recommendations based on user phase and session.
+    
+    Args:
+        user_id: ID of the user to recommend for
+        session: Current session number
+        num_recs: Number of recommendations to return
+        
+    Returns:
+        List of recommended video IDs (limited to num_recs)
+    """
     global users, video_pool_dict
-    users = initialize_users(20) if 'users' not in globals() else users
+    
+    # Initialize users if needed
+    if 'users' not in globals():
+        users = initialize_users(20)
+    
     phase = users[user_id]['phase']
     ranked_videos = get_video_rank()
     recommendations = []
 
+    # ============ DISCOVERY PHASE ============
+    # Random exploration with some ranked videos
     if phase == 'discovery' and session <= CONFIG['discovery_end']:
-        random.shuffle(ranked_videos)  # Randomize initial ranked videos
+        random.shuffle(ranked_videos)
         random_count = int(num_recs * CONFIG['exploration_rate'])
         ranked_count = num_recs - random_count
+        
         recommendations = ranked_videos[:ranked_count]
         recommendations.extend(random.sample(list(video_pool_dict.keys()), random_count))
     
+    # ============ PERSONALIZATION PHASE ============
+    # Score videos by user preferences and overall performance
     elif phase == 'personalization' or (session > CONFIG['discovery_end'] and session <= CONFIG['adaptation_start']):
         video_scores = []
         for vid in video_pool_dict.keys():
@@ -128,20 +164,30 @@ def recommend_videos(user_id, session, num_recs):
             pref_score = users[user_id]['category_prefs'].get(category, 0.0) * 100
             rank_score = Overall_Performance_Score(vid) or 0
             video_scores.append((vid, pref_score + rank_score))
+        
         video_scores.sort(key=lambda x: x[1], reverse=True)
         recommendations = [vid for vid, _ in video_scores[:num_recs]]
-        # Force 1 rec from each category, up to num_recs, prioritizing diversity
-        diversity_vids = {cat: [vid for vid in video_pool_dict if video_pool_dict[vid]['category'] == cat and vid not in recommendations] for cat in categories}
+        
+        # Add diversity: force one recommendation from each category
+        diversity_vids = {
+            cat: [vid for vid in video_pool_dict 
+                  if video_pool_dict[vid]['category'] == cat and vid not in recommendations]
+            for cat in categories
+        }
+        
         diversity_picks = []
         for cat in categories:
             if diversity_vids[cat]:
                 diversity_picks.append(random.choice(diversity_vids[cat]))
-                diversity_vids[cat] = [v for v in diversity_vids[cat] if v not in diversity_picks]
-        diversity_picks = diversity_picks[:num_recs]  # Cap at 6
+        
+        diversity_picks = diversity_picks[:num_recs]
         recommendations = diversity_picks + [vid for vid in recommendations if vid not in diversity_picks][:num_recs - len(diversity_picks)]
     
+    # ============ ADAPTATION PHASE ============
+    # Score with additional boosts for recent interactions and underrepresented categories
     elif phase == 'adaptation' or session > CONFIG['adaptation_start']:
         recent_vids = [i['video_id'] for i in users[user_id]['interactions'][-5:]] if users[user_id]['interactions'] else []
+        
         video_scores = []
         for vid in video_pool_dict.keys():
             category = video_pool_dict[vid]['category']
@@ -149,17 +195,26 @@ def recommend_videos(user_id, session, num_recs):
             rank_score = Overall_Performance_Score(vid) or 0
             recent_boost = 50 if vid in recent_vids else 0
             low_pref_boost = 100 if users[user_id]['category_prefs'].get(category, 0.0) < 0.4 else 0
-            video_scores.append((vid, pref_score + rank_score + recent_boost + low_pref_boost))
+            
+            total_score = pref_score + rank_score + recent_boost + low_pref_boost
+            video_scores.append((vid, total_score))
+        
         video_scores.sort(key=lambda x: x[1], reverse=True)
         recommendations = [vid for vid, _ in video_scores[:num_recs]]
-        # Force 1 rec from each category, up to num_recs, prioritizing diversity
-        diversity_vids = {cat: [vid for vid in video_pool_dict if video_pool_dict[vid]['category'] == cat and vid not in recommendations] for cat in categories}
+        
+        # Add diversity: force one recommendation from each category
+        diversity_vids = {
+            cat: [vid for vid in video_pool_dict 
+                  if video_pool_dict[vid]['category'] == cat and vid not in recommendations]
+            for cat in categories
+        }
+        
         diversity_picks = []
         for cat in categories:
             if diversity_vids[cat]:
                 diversity_picks.append(random.choice(diversity_vids[cat]))
-                diversity_vids[cat] = [v for v in diversity_vids[cat] if v not in diversity_picks]
-        diversity_picks = diversity_picks[:num_recs]  # Cap at 6
+        
+        diversity_picks = diversity_picks[:num_recs]
         recommendations = diversity_picks + [vid for vid in recommendations if vid not in diversity_picks][:num_recs - len(diversity_picks)]
 
     return recommendations[:num_recs]
