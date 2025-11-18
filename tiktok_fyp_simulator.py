@@ -220,6 +220,7 @@ def recommend_videos(user_id, session, num_recs):
     return recommendations[:num_recs]
 
 def run_simulation(user_id, num_sessions):
+    """Simulate user interactions over a number of sessions."""
     global users, video_pool_dict
     users = initialize_users(20) if 'users' not in globals() else users
     for session in range(1, num_sessions + 1):
@@ -234,6 +235,7 @@ def run_simulation(user_id, num_sessions):
     return users
 
 def analyze_user_phase_metrics(user_id):
+    """Analyze user engagement metrics across different learning phases."""
     global users
     if user_id not in users:
         return {"error": f"User {user_id} not found"}
@@ -249,6 +251,7 @@ def analyze_user_phase_metrics(user_id):
         if interaction['commented']: engagement += 75  # Comment bonus
         phase_data[phase].append(engagement)
     
+    """Calculate the average engagement, For each phase"""
     metrics = {}
     discovery_avg = 0
     personalization_avg = 0
@@ -260,6 +263,11 @@ def analyze_user_phase_metrics(user_id):
                 discovery_avg = avg_engagement
             elif phase == 'personalization':
                 personalization_avg = avg_engagement
+    """
+    Measures how engagement changed from discovery → personalization.
+    Positive number → user is engaging more over time.
+    Negative number → engagement dropped.
+    """
     if discovery_avg > 0 and personalization_avg > 0:
         satisfaction_trend = ((personalization_avg - discovery_avg) / discovery_avg) * 100
         metrics['satisfaction_trend'] = satisfaction_trend
@@ -299,6 +307,9 @@ def measure_algo_effectiveness():
             continue
         high_engagement_recs = sum(1 for i in interactions if i['completion'] > 0.5) / len(interactions)
         effectiveness[user_id] = {'rec_accuracy': high_engagement_recs * 100}
+
+        """Track engagement by phase"""
+
         phase_engagements = {'discovery': [], 'personalization': [], 'adaptation': []}
         for i in interactions:
             phase = 'discovery' if i['session'] <= CONFIG['discovery_end'] else \
@@ -308,10 +319,19 @@ def measure_algo_effectiveness():
             if i['shared']: engagement += CONFIG['share_bonus']
             if i['commented']: engagement += 75
             phase_engagements[phase].append(engagement)
+
+            """Measure personalization boost"""
+
         if phase_engagements['discovery'] and phase_engagements['personalization']:
             personalization_boost = ((sum(phase_engagements['personalization']) / len(phase_engagements['personalization']) if phase_engagements['personalization'] else 0) - 
                                   (sum(phase_engagements['discovery']) / len(phase_engagements['discovery']))) / (sum(phase_engagements['discovery']) / len(phase_engagements['discovery'])) * 100
             effectiveness[user_id]['personalization_boost'] = personalization_boost
+            """
+            Measure diversity balance:
+                Counts how many unique categories the user actually interacted with.
+                Divides by total number of categories → percentage coverage.
+                Measures whether the algorithm shows a balanced mix of content, not just one category.
+            """
         unique_cats = set(video_pool_dict[i['video_id']]['category'] for i in interactions)
         diversity_balance = len(unique_cats) / len(categories) if categories else 0
         effectiveness[user_id]['diversity_balance'] = diversity_balance * 100
