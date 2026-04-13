@@ -8,7 +8,7 @@ CONFIG = {
     'like_bonus': 50,
     'share_bonus': 100,
     'initial_recs': 6,
-    'video_pool_size': 60,
+    'video_pool_size': 1000,
     'min_watch_time': 5,
     'max_watch_time': 60,
     'viral_threshold': 0.7,
@@ -18,6 +18,14 @@ CONFIG = {
 }
 
 categories = ['cooking', 'dance', 'comedy', 'pets', 'sports']
+
+CATEGORY_COLORS = {
+    'cooking': '#E07B54',
+    'dance':   '#5B8DB8',
+    'comedy':  '#F5C842',
+    'pets':    '#6DB56D',
+    'sports':  '#9B6BB5',
+}
 
 def video_pool():
     """Create a pool of videos with categories, titles, base popularity, and initial performance metrics."""
@@ -77,10 +85,22 @@ def log_interaction(user_id, video_id, watch_time, liked, shared, commented, ses
         users[user_id]['interactions'].append(interaction)
         update_video_performance(video_id, watch_time, liked, shared, commented)
         
-        pref_boost = 0.0
-        if watch_time > 30 or liked or shared or commented:
-            pref_boost = 0.1
-        users[user_id]['category_prefs'][video_category] = min(users[user_id]['category_prefs'][video_category] + pref_boost, 1.0)#Note: Give diffrent actions a variety of weightage
+        if shared:
+            pref_boost = 0.15      # sharing = strongest signal
+        elif liked or commented:
+            pref_boost = 0.08
+        elif watch_time > 30:
+            pref_boost = 0.04      # passive watch = weakest signal
+        else:
+            pref_boost = 0.0
+        users[user_id]['category_prefs'][video_category] = min(users[user_id]['category_prefs'][video_category] + pref_boost, 1.0)
+
+        decay_rate = 0.01
+        for cat in users[user_id]['category_prefs']:
+            if cat != video_category:
+                users[user_id]['category_prefs'][cat] = max(
+                    users[user_id]['category_prefs'][cat] - decay_rate, 0.0
+                )
         
         if session > CONFIG['discovery_end'] and users[user_id]['phase'] == 'discovery': 
             users[user_id]['phase'] = 'personalization'
@@ -158,6 +178,18 @@ def recommend_videos(user_id, session, num_recs):
     # ============ PERSONALIZATION PHASE ============
     # Score videos by user preferences and overall performance
     elif phase == 'personalization' or (session > CONFIG['discovery_end'] and session <= CONFIG['adaptation_start']):
+        dominant_cat = max(users[user_id]['category_prefs'], key=users[user_id]['category_prefs'].get)
+        dominant_score = users[user_id]['category_prefs'][dominant_cat]
+
+        injected = []
+        if dominant_score > 0.6:
+            inject_cats = [c for c in categories if c != dominant_cat]
+            chosen_inject = random.sample(inject_cats, min(2, len(inject_cats)))
+            for cat in chosen_inject:
+                cat_vids = [v for v in video_pool_dict if video_pool_dict[v]['category'] == cat]
+                if cat_vids:
+                    injected.append(random.choice(cat_vids))
+
         video_scores = []
         for vid in video_pool_dict.keys():
             category = video_pool_dict[vid]['category']
@@ -181,13 +213,27 @@ def recommend_videos(user_id, session, num_recs):
                 diversity_picks.append(random.choice(diversity_vids[cat]))
         
         diversity_picks = diversity_picks[:num_recs]
-        recommendations = diversity_picks + [vid for vid in recommendations if vid not in diversity_picks][:num_recs - len(diversity_picks)]
-    
+        merged = diversity_picks + [vid for vid in recommendations if vid not in diversity_picks]
+        recommendations = injected + [vid for vid in merged if vid not in injected]
+        recommendations = recommendations[:num_recs]
+
     # ============ ADAPTATION PHASE ============
     # Score with additional boosts for recent interactions and underrepresented categories
     elif phase == 'adaptation' or session > CONFIG['adaptation_start']:
+        dominant_cat = max(users[user_id]['category_prefs'], key=users[user_id]['category_prefs'].get)
+        dominant_score = users[user_id]['category_prefs'][dominant_cat]
+
+        injected = []
+        if dominant_score > 0.6:
+            inject_cats = [c for c in categories if c != dominant_cat]
+            chosen_inject = random.sample(inject_cats, min(2, len(inject_cats)))
+            for cat in chosen_inject:
+                cat_vids = [v for v in video_pool_dict if video_pool_dict[v]['category'] == cat]
+                if cat_vids:
+                    injected.append(random.choice(cat_vids))
+
         recent_vids = [i['video_id'] for i in users[user_id]['interactions'][-5:]] if users[user_id]['interactions'] else []
-        
+
         video_scores = []
         for vid in video_pool_dict.keys():
             category = video_pool_dict[vid]['category']
@@ -215,7 +261,9 @@ def recommend_videos(user_id, session, num_recs):
                 diversity_picks.append(random.choice(diversity_vids[cat]))
         
         diversity_picks = diversity_picks[:num_recs]
-        recommendations = diversity_picks + [vid for vid in recommendations if vid not in diversity_picks][:num_recs - len(diversity_picks)]
+        merged = diversity_picks + [vid for vid in recommendations if vid not in diversity_picks]
+        recommendations = injected + [vid for vid in merged if vid not in injected]
+        recommendations = recommendations[:num_recs]
 
     return recommendations[:num_recs]
 
@@ -338,6 +386,12 @@ def measure_algo_effectiveness():
     return effectiveness
 
 def generate_insights():
+    """
+    takes all the user and video data, pulls out key metrics from your simulation, and turns them into a readable summary:
+        How users engagement changes across phases
+        Which videos went viral and why
+        Overall algorithm recommendation accuracy
+    """
     global users
     insights = []
     for user_id in users:
@@ -359,39 +413,103 @@ def generate_insights():
 def plot_user_engagement(user_id):
     metrics = analyze_user_phase_metrics(user_id)
     phases = ['discovery', 'personalization', 'adaptation']
+    labels = ['Discovery', 'Personalization', 'Adaptation']
+    phase_colors = ['#5B8DB8', '#F5C842', '#6DB56D']
     engagements = [metrics.get(f'{p}_avg_engagement', 0) for p in phases]
-    plt.figure(figsize=(8, 5))
-    plt.plot(phases, engagements, marker='o')
-    plt.title(f'{user_id} Engagement by Phase')
-    plt.ylabel('Average Engagement (seconds)')
-    plt.grid(True)
-    plt.savefig(f'{user_id}_engagement.png')
+    trend = metrics.get('satisfaction_trend', 0)
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    bars = ax.bar(labels, engagements, color=phase_colors, width=0.5, edgecolor='white', linewidth=1.2)
+
+    for bar, val in zip(bars, engagements):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.8,
+                f'{val:.1f}', ha='center', va='bottom', fontsize=11, fontweight='bold')
+
+    trend_color = '#2ECC71' if trend >= 0 else '#E74C3C'
+    trend_symbol = '▲' if trend >= 0 else '▼'
+    ax.annotate(f'Discovery → Personalization\n{trend_symbol} {abs(trend):.1f}% change',
+                xy=(0.98, 0.95), xycoords='axes fraction', ha='right', va='top',
+                fontsize=10, color=trend_color,
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor=trend_color, alpha=0.8))
+
+    ax.set_title(f'{user_id} — Avg Engagement Score by Phase', fontsize=13, fontweight='bold', pad=12)
+    ax.set_ylabel('Avg Engagement Score\n(watch time + action bonuses)', fontsize=10)
+    ax.set_ylim(0, max(engagements) * 1.25 if any(engagements) else 10)
+    ax.spines[['top', 'right']].set_visible(False)
+    ax.yaxis.grid(True, linestyle='--', alpha=0.5)
+    ax.set_axisbelow(True)
+    plt.tight_layout()
+    plt.savefig(f'{user_id}_engagement.png', dpi=120)
     plt.close()
 
 def plot_top_videos():
     video_data = analyze_video_performance()
     top_vids = video_data['top_virals']
     vids, data = zip(*top_vids)
+    titles = [video_pool_dict[v]['title'] for v in vids]
+    cats = [video_pool_dict[v]['category'] for v in vids]
     completions = [d['avg_completion'] * 100 for d in data]
-    plt.figure(figsize=(8, 5))
-    plt.bar([video_pool_dict[v]['title'] for v in vids], completions)
-    plt.title('Top 3 Viral Videos by Completion Rate')
-    plt.ylabel('Completion Rate (%)')
-    plt.xticks(rotation=45)
-    plt.savefig('top_videos.png')
+    engages = [d['total_engages'] for d in data]
+    colors = [CATEGORY_COLORS.get(cat, '#888888') for cat in cats]
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    bars = ax.bar(titles, completions, color=colors, width=0.5, edgecolor='white', linewidth=1.2)
+
+    for bar, val, eng, cat in zip(bars, completions, engages, cats):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5,
+                f'{val:.1f}%\n({eng} engages)', ha='center', va='bottom', fontsize=10, fontweight='bold')
+        ax.text(bar.get_x() + bar.get_width() / 2, -2.5,
+                cat, ha='center', va='top', fontsize=9,
+                color=CATEGORY_COLORS.get(cat, '#888888'), fontstyle='italic')
+
+    ax.set_title('Top 3 Viral Videos — Completion Rate & Total Engagements', fontsize=13, fontweight='bold', pad=12)
+    ax.set_ylabel('Avg Completion Rate (%)', fontsize=10)
+    ax.set_ylim(0, max(completions) * 1.35 if any(completions) else 10)
+    ax.spines[['top', 'right']].set_visible(False)
+    ax.yaxis.grid(True, linestyle='--', alpha=0.5)
+    ax.set_axisbelow(True)
+    plt.tight_layout()
+    plt.savefig('top_videos.png', dpi=120)
     plt.close()
 
 def plot_category_dominance():
     video_data = analyze_video_performance()
     dominance = video_data['category_dominance']
-    plt.figure(figsize=(8, 5))
-    plt.bar(dominance.keys(), dominance.values())
-    plt.title('Category Dominance in Top Virals Across Users')
-    plt.ylabel('Dominance Proportion')
-    plt.savefig('category_dominance.png')
+    cats = list(dominance.keys())
+    values = [dominance[c] * 100 for c in cats]
+    colors = [CATEGORY_COLORS.get(c, '#888888') for c in cats]
+    equal_share = 100 / len(cats)
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    bars = ax.bar(cats, values, color=colors, width=0.5, edgecolor='white', linewidth=1.2)
+
+    for bar, val in zip(bars, values):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.4,
+                f'{val:.1f}%', ha='center', va='bottom', fontsize=11, fontweight='bold')
+
+    ax.axhline(equal_share, color='#E74C3C', linestyle='--', linewidth=1.4,
+               label=f'Equal share ({equal_share:.0f}%)')
+    ax.legend(fontsize=10)
+
+    ax.set_title('Category Engagement Dominance Across All Users', fontsize=13, fontweight='bold', pad=12)
+    ax.set_ylabel('Share of Total Engagements (%)', fontsize=10)
+    ax.set_ylim(0, max(values) * 1.3 if any(values) else 10)
+    ax.spines[['top', 'right']].set_visible(False)
+    ax.yaxis.grid(True, linestyle='--', alpha=0.5)
+    ax.set_axisbelow(True)
+    plt.tight_layout()
+    plt.savefig('category_dominance.png', dpi=120)
     plt.close()
 
 if __name__ == "__main__":
+    """ 
+    Creates videos and users
+    Runs the simulation for all users
+    Prints key results for inspection
+    Generates textual insights
+    Creates visualizations
+    
+    """
     video_pool_dict = video_pool()
     users = initialize_users(20)
     print("Initial users:", users)
